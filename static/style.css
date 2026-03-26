@@ -265,6 +265,7 @@ header h1 {
   letter-spacing: 0.05em;
 }
 
+.settings-row input[type="text"],
 .settings-row input[type="number"] {
   background: var(--surface2);
   border: 1px solid var(--border);

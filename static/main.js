@@ -204,8 +204,7 @@ async function submitJob() {
       start: c.start,
       duration: c.duration,
     })),
-    font_size: parseInt(document.getElementById("font-size").value) || 72,
-    text_y: parseInt(document.getElementById("text-y").value) || 80,
+    list_title: document.getElementById("list-title").value.trim() || "TOP 5",
   };
 
   try {
