@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TikTok Video Maker</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <div class="app">
+
+    <header>
+      <h1>TikTok Video Maker</h1>
+      <p class="subtitle">Build Top 5 countdown clips instantly</p>
+      <div id="status-bar" class="status-bar hidden"></div>
+    </header>
+
+    <!-- Step 1: Upload -->
+    <section class="card" id="upload-section">
+      <h2><span class="step">1</span> Upload Your Clips</h2>
+      <div
+        id="drop-zone"
+        class="drop-zone"
+        ondragover="event.preventDefault(); this.classList.add('drag-over')"
+        ondragleave="this.classList.remove('drag-over')"
+        ondrop="handleDrop(event)"
+        onclick="document.getElementById('file-input').click()"
+      >
+        <div class="drop-icon">&#x1F4F9;</div>
+        <p>Drop video files here<br /><span>or click to browse</span></p>
+        <p class="hint">Supports .mp4 .mov .webm .mkv .avi</p>
+      </div>
+      <input
+        type="file"
+        id="file-input"
+        accept=".mp4,.mov,.webm,.mkv,.avi"
+        multiple
+        style="display:none"
+        onchange="handleFileInput(this.files)"
+      />
+    </section>
+
+    <!-- Step 2: Configure Clips -->
+    <section class="card" id="clips-section" style="display:none">
+      <h2><span class="step">2</span> Configure Clips</h2>
+      <p class="hint">Order = order in final video. Top card plays first.</p>
+      <div id="clip-list"></div>
+    </section>
+
+    <!-- Step 3: Settings + Generate -->
+    <section class="card" id="generate-section" style="display:none">
+      <h2><span class="step">3</span> Generate Video</h2>
+
+      <div class="settings-row">
+        <label>
+          Text size (px)
+          <input type="number" id="font-size" value="72" min="20" max="200" step="4" />
+        </label>
+        <label>
+          Text Y position (px from top)
+          <input type="number" id="text-y" value="80" min="0" max="400" step="10" />
+        </label>
+      </div>
+
+      <button id="generate-btn" class="btn-primary" onclick="submitJob()">
+        Generate Video
+      </button>
+
+      <!-- Progress -->
+      <div id="progress-area" class="hidden">
+        <div class="spinner"></div>
+        <p id="progress-text">Processing... this may take a minute.</p>
+      </div>
+
+      <!-- Error -->
+      <div id="error-area" class="hidden">
+        <p class="error-title">FFmpeg error — details below:</p>
+        <pre id="error-text" class="error-box"></pre>
+      </div>
+
+      <!-- Download -->
+      <div id="download-area" class="hidden">
+        <div class="success-icon">&#x2705;</div>
+        <p>Your video is ready!</p>
+        <a id="download-link" class="btn-download" download>Download MP4</a>
+      </div>
+    </section>
+
+  </div><!-- .app -->
+
+  <!-- Hidden video for preview -->
+  <video id="preview-video" style="display:none" preload="metadata"></video>
+
+  <script src="/static/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.env
+
+# App data — never commit user uploads or generated videos
+uploads/
+outputs/
+
+# Font file — download Roboto-Bold.ttf from fonts.google.com and place here
+fonts/*.ttf
+fonts/*.otf
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
