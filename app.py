@@ -32,6 +32,8 @@ VIDEO_Y = RANK_AREA_BOTTOM + 50       # = 850
 RANK_NUM_X   = 50    # x position of the rank number glyph
 RANK_TITLE_X = 155   # x position of the title text next to the number
 
+FADE_DURATION = 0.3  # seconds for fade-in / fade-out between clips
+
 
 def get_ffmpeg_font_path():
     """Font path in FFmpeg drawtext-safe format for Windows."""
@@ -79,11 +81,13 @@ def build_title_drawtext(parts, font_path, fontsize, y):
     Build drawtext filter strings for a multi-colour title line.
     Segments are placed side-by-side using exact font metrics, then centred.
     """
+    SEG_GAP = 6  # extra px between colour segments so they don't merge visually
     total_w = sum(measure_text_width(text, fontsize) for text, _ in parts)
+    total_w += SEG_GAP * (len(parts) - 1)
     x = (CANVAS_W - total_w) / 2
 
     filters = []
-    for text, color in parts:
+    for idx, (text, color) in enumerate(parts):
         safe = sanitize_for_drawtext(text)
         filters.append(
             f"drawtext=fontfile='{font_path}':"
@@ -94,8 +98,27 @@ def build_title_drawtext(parts, font_path, fontsize, y):
             f"x={int(x)}:y={y}:"
             f"shadowx=2:shadowy=2:shadowcolor=black@0.8"
         )
-        x += measure_text_width(text, fontsize)
+        x += measure_text_width(text, fontsize) + SEG_GAP
     return filters
+
+
+def get_clip_duration(file_path):
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", file_path],
+        capture_output=True, text=True,
+    )
+    val = result.stdout.strip()
+    if val and val != "N/A":
+        return float(val)
+    # Fallback: read container duration
+    result2 = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=noprint_wrappers=1:nokey=1", file_path],
+        capture_output=True, text=True,
+    )
+    return float(result2.stdout.strip())
 
 
 def has_audio_stream(file_path):
@@ -108,7 +131,7 @@ def has_audio_stream(file_path):
     return result.stdout.strip() == "audio"
 
 
-def build_clip_filter(clip_index, all_clips, has_audio, font_path, list_title):
+def build_clip_filter(clip_index, all_clips, has_audio, font_path, list_title, duration):
     """
     Build the filter_complex segment for clip at clip_index.
 
@@ -131,9 +154,6 @@ def build_clip_filter(clip_index, all_clips, has_audio, font_path, list_title):
     i     = clip_index
     N     = len(all_clips)
 
-    start    = float(clip.get("start",    0))
-    duration = float(clip.get("duration", 15))
-
     rank_area_h = RANK_AREA_BOTTOM - RANK_AREA_TOP   # 550
     entry_h     = rank_area_h / N                     # height per rank row
 
@@ -141,22 +161,22 @@ def build_clip_filter(clip_index, all_clips, has_audio, font_path, list_title):
     # FFmpeg does not allow referencing the same input stream twice without split
     split = f"[{i}:v]split=2[{i}v_bg][{i}v_fg];"
 
-    # ── 2. Background: fill canvas, heavy blur, darken ────────────────────
+    # ── 2. Background: fill canvas, heavy blur, normalise to 30 fps ──────
+    # fps=30 is required so xfade transitions work across clips from different sources
     bg = (
-        f"[{i}v_bg]trim=start={start}:duration={duration},"
-        f"setpts=PTS-STARTPTS,"
+        f"[{i}v_bg]setpts=PTS-STARTPTS,"
         f"scale={CANVAS_W}:{CANVAS_H}:force_original_aspect_ratio=increase,"
         f"crop={CANVAS_W}:{CANVAS_H},"
+        f"fps=30,"
         f"boxblur=30:5"
         f"[bg{i}];"
     )
 
-    # ── 3. Foreground: fit inside video box, black letterbox bars ─────────
+    # ── 3. Foreground: scale-to-fill video box, crop any overflow (no black bars) ─
     fg = (
-        f"[{i}v_fg]trim=start={start}:duration={duration},"
-        f"setpts=PTS-STARTPTS,"
-        f"scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=decrease,"
-        f"pad={VIDEO_W}:{VIDEO_H}:(ow-iw)/2:(oh-ih)/2:color=black"
+        f"[{i}v_fg]setpts=PTS-STARTPTS,"
+        f"scale={VIDEO_W}:{VIDEO_H}:force_original_aspect_ratio=increase,"
+        f"crop={VIDEO_W}:{VIDEO_H}"
         f"[fg{i}];"
     )
 
@@ -229,8 +249,7 @@ def build_clip_filter(clip_index, all_clips, has_audio, font_path, list_title):
     # ── 5. Audio ──────────────────────────────────────────────────────────
     if has_audio:
         audio = (
-            f"[{i}:a]atrim=start={start}:duration={duration},"
-            f"asetpts=PTS-STARTPTS,"
+            f"[{i}:a]asetpts=PTS-STARTPTS,"
             f"aformat=sample_rates=44100:channel_layouts=stereo[a{i}];"
         )
     else:
@@ -239,7 +258,7 @@ def build_clip_filter(clip_index, all_clips, has_audio, font_path, list_title):
     return split + bg + fg + overlay + text_filter + audio
 
 
-def build_concat_command(clips, clip_audio_flags, output_path, list_title):
+def build_concat_command(clips, clip_audio_flags, clip_durations, output_path, list_title):
     font_path = get_ffmpeg_font_path()
     n = len(clips)
 
@@ -248,14 +267,42 @@ def build_concat_command(clips, clip_audio_flags, output_path, list_title):
         inputs += ["-i", os.path.join(UPLOAD_DIR, clip["upload_id"] + ".mp4")]
 
     filter_parts = []
-    for i, (clip, has_audio) in enumerate(zip(clips, clip_audio_flags)):
+    for i, (clip, has_audio, dur) in enumerate(zip(clips, clip_audio_flags, clip_durations)):
         filter_parts.append(
-            build_clip_filter(i, clips, has_audio, font_path, list_title)
+            build_clip_filter(i, clips, has_audio, font_path, list_title, dur)
         )
 
-    # concat expects interleaved: [v0][a0][v1][a1]...
-    interleaved = "".join(f"[v{i}][a{i}]" for i in range(n))
-    filter_parts.append(f"{interleaved}concat=n={n}:v=1:a=1[vout][aout]")
+    durations = clip_durations
+
+    if n == 1:
+        # Single clip — no transition needed, just pass through
+        filter_parts.append("[v0]null[vout];[a0]anull[aout]")
+    else:
+        # Chain clips with crossfade transitions instead of hard cuts.
+        # xfade offset = time in the running output when the transition starts.
+        # Each transition overlaps by FADE_DURATION, so the offset accumulates:
+        #   k=0: d0 - F
+        #   k=1: d0 + d1 - 2F
+        #   k=2: d0 + d1 + d2 - 3F  ...etc.
+        cumulative = 0.0
+        prev_v = "[v0]"
+        prev_a = "[a0]"
+
+        for k in range(1, n):
+            cumulative += durations[k - 1]
+            offset = round(cumulative - k * FADE_DURATION, 6)
+            out_v  = "[vout]" if k == n - 1 else f"[xv{k}]"
+            out_a  = "[aout]" if k == n - 1 else f"[xa{k}]"
+
+            filter_parts.append(
+                f"{prev_v}[v{k}]xfade=transition=fade:"
+                f"duration={FADE_DURATION}:offset={offset}{out_v};"
+            )
+            filter_parts.append(
+                f"{prev_a}[a{k}]acrossfade=d={FADE_DURATION}{out_a};"
+            )
+            prev_v = out_v
+            prev_a = out_a
 
     cmd = [
         "ffmpeg", "-y",
@@ -280,17 +327,19 @@ def generate_video(job):
     list_title = job.get("list_title", "TOP 5")
 
     clip_audio_flags = []
+    clip_durations   = []
     for clip in clips:
         path = os.path.join(UPLOAD_DIR, clip.get("upload_id", "") + ".mp4")
         if not os.path.isfile(path):
             raise ValueError(f"Upload not found: {clip.get('upload_id')}")
         clip_audio_flags.append(has_audio_stream(path))
+        clip_durations.append(get_clip_duration(path))
 
     timestamp       = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_filename = f"tiktok_{timestamp}.mp4"
     output_path     = os.path.join(OUTPUT_DIR, output_filename)
 
-    cmd    = build_concat_command(clips, clip_audio_flags, output_path, list_title)
+    cmd    = build_concat_command(clips, clip_audio_flags, clip_durations, output_path, list_title)
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:

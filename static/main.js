@@ -1,4 +1,4 @@
-// State: array of { upload_id, original_name, label, start, duration }
+// State: array of { upload_id, original_name, label }
 const clips = [];
 
 // ── Startup checks ────────────────────────────────────────────────────────
@@ -63,8 +63,6 @@ async function uploadFile(file) {
     _temp_id: tempId,
     original_name: file.name,
     label: guessLabel(clips.length + 1, file.name),
-    start: 0,
-    duration: 15,
     uploading: true,
   };
   clips.push(clip);
@@ -125,18 +123,6 @@ function renderClips() {
           <button onclick="moveClip(${i}, 1)" title="Move down" ${i === clips.length - 1 ? "disabled" : ""}>▼</button>
           <button class="btn-remove" onclick="removeClip(${i})">✕</button>
         </div>
-      </div>
-      <div class="clip-timing">
-        <label>
-          Start (sec)
-          <input type="number" value="${clip.start}" min="0" step="0.5"
-            oninput="updateClip(${i}, 'start', parseFloat(this.value) || 0)" />
-        </label>
-        <label>
-          Duration (sec)
-          <input type="number" value="${clip.duration}" min="1" max="300" step="0.5"
-            oninput="updateClip(${i}, 'duration', parseFloat(this.value) || 15)" />
-        </label>
       </div>
       <div class="clip-filename">${escapeHtml(clip.original_name)}</div>
     `;
@@ -201,8 +187,6 @@ async function submitJob() {
     clips: readyClips.map(c => ({
       upload_id: c.upload_id,
       label: c.label,
-      start: c.start,
-      duration: c.duration,
     })),
     list_title: document.getElementById("list-title").value.trim() || "TOP 5",
   };
